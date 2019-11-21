@@ -12,38 +12,35 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-var dbURL string
-var dbName string
-var client *mongo.Client
-var db *mongo.Database
-
 func init() {
-	if os.Getenv("ENV") == "development" {
-		err := godotenv.Load()
-		if err != nil {
-			log.Fatal("Error loading .env file")
-		}
-
-		dbURL = os.Getenv("DB_URL")
-		dbName = os.Getenv("DB_NAME")
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Error loading .env file")
 	}
+}
 
+func connect(dbURL string) (client *mongo.Client, err error) {
 	clientOptions := options.Client().ApplyURI(dbURL)
-
-	var err error
 	client, err = mongo.Connect(context.TODO(), clientOptions)
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 
-	db = client.Database(dbName)
+	return client, nil
 }
 
 func main() {
 	go spinner(100 * time.Millisecond)
 
+	dbURL := os.Getenv("DB_URL")
+	client, err := connect(dbURL)
+
+	if err != nil {
+		log.Fatal("Error connecting to MongoDB instance:", err)
+	}
+
 	// Check the connection
-	err := client.Ping(context.TODO(), nil)
+	err = client.Ping(context.TODO(), nil)
 
 	if err != nil {
 		log.Fatal(err)
