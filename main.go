@@ -5,12 +5,22 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"time"
 
 	"github.com/joho/godotenv"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
+
+type database struct {
+	*mongo.Database
+}
+
+func (db *database) setIndexes(collection string, indexes []mongo.IndexModel, c chan<- string) {
+	col := db.Collection(collection)
+	col.Indexes().CreateMany(context.Background(), indexes)
+
+	c <- fmt.Sprintf("\rCreated indexes for %s\n", collection)
+}
 
 func init() {
 	err := godotenv.Load()
@@ -19,7 +29,7 @@ func init() {
 	}
 }
 
-func connect(dbURL string) (client *mongo.Client, err error) {
+func connect(dbURL, dbName string) (client *mongo.Client, err error) {
 	clientOptions := options.Client().ApplyURI(dbURL)
 	client, err = mongo.Connect(context.TODO(), clientOptions)
 	if err != nil {
@@ -30,36 +40,31 @@ func connect(dbURL string) (client *mongo.Client, err error) {
 }
 
 func main() {
-	go spinner(100 * time.Millisecond)
-
 	dbURL := os.Getenv("DB_URL")
-	client, err := connect(dbURL)
-
+	dbName := os.Getenv("DB_NAME")
+	client, err := connect(dbURL, dbName)
 	if err != nil {
 		log.Fatal("Error connecting to MongoDB instance:", err)
 	}
 
-	// Check the connection
-	err = client.Ping(context.TODO(), nil)
+	defer client.Disconnect(context.TODO())
 
-	if err != nil {
-		log.Fatal(err)
+	db := new(database)
+	db.Database = client.Database(dbName)
+
+	collections := map[string][]mongo.IndexModel{
+		"user":     getUserIndexes(),
+		"activity": getActivityIndexes(),
 	}
 
-	err = client.Disconnect(context.TODO())
+	fmt.Printf("\rGenerating indexes:\n")
+	ch := make(chan string, len(collections))
 
-	if err != nil {
-		log.Fatal(err)
+	for collection, indexes := range collections {
+		go db.setIndexes(collection, indexes, ch)
 	}
 
-	fmt.Printf("\rSuccessfully connected to MongoDB.\n")
-}
-
-func spinner(delay time.Duration) {
-	for {
-		for _, r := range `-\|/` {
-			fmt.Printf("\r%c", r)
-			time.Sleep(delay)
-		}
+	for i := 0; i < len(collections); i++ {
+		fmt.Printf(<-ch)
 	}
 }
