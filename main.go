@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -33,26 +34,48 @@ func main() {
 	go spinner(100 * time.Millisecond)
 
 	dbURL := os.Getenv("DB_URL")
+	dbName := os.Getenv("DB_NAME")
 	client, err := connect(dbURL)
-
 	if err != nil {
 		log.Fatal("Error connecting to MongoDB instance:", err)
 	}
 
-	// Check the connection
-	err = client.Ping(context.TODO(), nil)
+	db := client.Database(dbName)
+	defer client.Disconnect(context.TODO())
+
+	// get users
+	var users []*user
+	cur, err := db.Collection("user").Find(context.TODO(), bson.D{{}})
 
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	err = client.Disconnect(context.TODO())
+	for cur.Next(context.TODO()) {
+		var doc user
+		err := cur.Decode(&doc)
+		if err != nil {
+			log.Fatal(err)
+		}
 
-	if err != nil {
+		// do any cleanup to the data here
+
+		users = append(users, &doc)
+	}
+
+	if err := cur.Err(); err != nil {
 		log.Fatal(err)
 	}
 
-	fmt.Printf("\rSuccessfully connected to MongoDB.\n")
+	cur.Close(context.TODO())
+
+	newUsers := make([]interface{}, len(users))
+	for i := range users {
+		newUsers[i] = users[i]
+	}
+
+	insertOp, err := db.Collection("user_qa").InsertMany(context.TODO(), newUsers)
+	fmt.Printf("\rInserted documents: %v\n", insertOp.InsertedIDs)
 }
 
 func spinner(delay time.Duration) {
