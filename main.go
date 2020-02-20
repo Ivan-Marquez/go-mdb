@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"runtime"
+	"sync"
 
 	"github.com/joho/godotenv"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -15,11 +17,9 @@ type database struct {
 	*mongo.Database
 }
 
-func (db *database) setIndexes(collection string, indexes []mongo.IndexModel, c chan<- string) {
+func (db *database) setIndexes(collection string, indexes []mongo.IndexModel) {
 	col := db.Collection(collection)
 	col.Indexes().CreateMany(context.Background(), indexes)
-
-	c <- fmt.Sprintf("\rCreated indexes for %s\n", collection)
 }
 
 func init() {
@@ -40,6 +40,7 @@ func connect(dbURL, dbName string) (client *mongo.Client, err error) {
 }
 
 func main() {
+	var wg sync.WaitGroup
 	dbURL := os.Getenv("DB_URL")
 	dbName := os.Getenv("DB_NAME")
 	client, err := connect(dbURL, dbName)
@@ -57,14 +58,19 @@ func main() {
 		"activity": getActivityIndexes(),
 	}
 
+	wg.Add(len(collections))
+
+	fmt.Printf("\rCPU's: %d\n", runtime.NumCPU())
 	fmt.Printf("\rGenerating indexes:\n")
-	ch := make(chan string, len(collections))
 
 	for collection, indexes := range collections {
-		go db.setIndexes(collection, indexes, ch)
+		go func(col string, idx []mongo.IndexModel) {
+			defer wg.Done()
+
+			db.setIndexes(col, idx)
+			fmt.Printf("\rCreated indexes for %s\n", col)
+		}(collection, indexes)
 	}
 
-	for i := 0; i < len(collections); i++ {
-		fmt.Printf(<-ch)
-	}
+	wg.Wait()
 }
